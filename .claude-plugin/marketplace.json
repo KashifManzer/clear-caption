@@ -1,6 +1,6 @@
 {
   "name": "clear-caption",
-  "description": "A Claude Code mod that puts a plain-language caption on every tool call.",
+  "description": "A Claude Code mod that puts a plain-language caption on each shell command and subagent.",
   "owner": { "name": "KashifManzer" },
   "plugins": [{ "name": "clear-caption", "source": "./" }]
 }

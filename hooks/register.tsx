@@ -1,39 +1,17 @@
 import type { Register } from 'claude-code'
 
-import { commandOf, labelFor, stateOf } from './label'
+import { captionOf } from './label'
 
-// The tool row says what the call does in plain words; the engine's own command box stays.
+// Says what a call does in plain words, as a dim transcript line, before it runs.
+// A line of its own, not the tool row: another mod (a skin) may own the row, and no mod owns this.
 export const register: Register = on => {
-  on('ui.render', { component: 'ToolUse' }, ($, e, next) => {
-    const label = labelFor(e.props.tool, e.props.input)
+  on('tool.call', { tool: ['Bash', 'Agent'] }, ($, e, next) => {
+    const caption = captionOf(e)
 
-    if (label === null) {
-      return next(e)
+    if (caption !== null) {
+      $.ui.log(caption)
     }
 
-    const { Box, Text } = $.ui.resolve(e)
-    const { color, note } = stateOf(e.props)
-    const command = e.props.isRunning ? commandOf(e.props.tool, e.props.input) : null
-
-    const row = (
-      <Box>
-        <Text color={color}>● </Text>
-        <Text bold>
-          {label}
-          {note}
-        </Text>
-      </Box>
-    )
-
-    if (command === null) {
-      return row
-    }
-
-    return (
-      <Box flexDirection="column">
-        {row}
-        <Text dimColor>  {command}</Text>
-      </Box>
-    )
+    return next(e)
   })
 }

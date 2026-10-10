@@ -1,55 +1,49 @@
 import { expect, test } from 'claude-code/testing'
 
-import { commandOf, labelFor, stateOf } from './label'
+import { captionOf } from './label'
 
-const call = { tool_use_id: 't1', isRunning: false, isErrored: false, isInterrupted: false, onScreen: null }
-
-test('bash uses its description, missing description leaves the engine text', () => {
-  expect(labelFor('Bash', { command: 'git status', description: 'Show working tree status' })).toBe('Show working tree status')
-  expect(labelFor('Bash', { command: 'npm run build' })).toBe(null)
-  expect(labelFor('Bash', { command: 'x', description: '   ' })).toBe(null)
+test('Bash and Agent use their description, nothing to say gives null', () => {
+  expect(captionOf({ tool: 'Bash', description: 'Show working tree status' })).toBe('Show working tree status')
+  expect(captionOf({ tool: 'Agent', description: 'Search the repo' })).toBe('Search the repo')
+  expect(captionOf({ tool: 'Bash' })).toBe(null)
+  expect(captionOf({ tool: 'Bash', description: '   ' })).toBe(null)
+  expect(captionOf({ tool: 'Edit', description: 'x' })).toBe(null)
 })
 
-test('other tools derive from input, unknown tools are left alone', () => {
-  expect(labelFor('Edit', { file_path: '/a/b/app.ts' })).toBe('Editing app.ts')
-  expect(labelFor('NotebookEdit', { notebook_path: '/a/b/analysis.ipynb' })).toBe('Editing analysis.ipynb')
-  expect(labelFor('Edit', {})).toBe(null)
-  expect(labelFor('Unknown', { description: 'x' })).toBe(null)
-  expect(labelFor('Bash', { description: 'First line\nsecond line' })).toBe('First line')
+test('a subagent call is skipped', () => {
+  expect(captionOf({ tool: 'Bash', description: 'List files', agentId: 'a1' })).toBe(null)
 })
 
-test('the real command is offered for Bash only, first line, cut when long', () => {
-  expect(commandOf('Bash', { command: 'ls -la\nrm -rf x' })).toBe('$ ls -la')
-  expect(commandOf('Bash', { command: 'a'.repeat(200) })).toBe(`$ ${'a'.repeat(159)}…`)
-  expect(commandOf('Bash', {})).toBe(null)
-  expect(commandOf('Edit', { command: 'x' })).toBe(null)
+test('captions are one line with no control characters', () => {
+  expect(captionOf({ tool: 'Bash', description: 'First line\nsecond line' })).toBe('First line')
+  expect(captionOf({ tool: 'Bash', description: 'List files\r\nthen more' })).toBe('List files')
+  expect(captionOf({ tool: 'Bash', description: '\n\nWhat it does' })).toBe('What it does')
+  expect(captionOf({ tool: 'Bash', description: 'Clean\u001b[31m red \u001b[0mup' })).toBe('Clean[31m red [0mup')
+  expect(captionOf({ tool: 'Bash', description: 'Ring\u0007 bell' })).toBe('Ring bell')
 })
 
-test('failed and interrupted calls keep their signal', () => {
-  expect(stateOf({})).toEqual({ color: undefined, note: '' })
-  expect(stateOf({ isErrored: true })).toEqual({ color: 'error', note: ' (failed)' })
-  expect(stateOf({ isInterrupted: true, isErrored: true })).toEqual({ color: 'warning', note: ' (interrupted)' })
-})
-
-test('the row draws the label, and the state, on the terminal and desktop', async $ => {
-  for (const surface of ['terminal', 'desktop'] as const) {
-    const props = { ...call, tool: 'Bash', input: { command: 'ls', description: 'List files' } }
-
-    const ok = await $.ui.mount({ plugin: 'clear-caption', surface, component: 'ToolUse', requestId: 't1', props })
-    expect(await ok.find({ type: 'Text', text: /List files/ })).toBeDefined()
-    await ok.unmount()
-
-    const bad = await $.ui.mount({ plugin: 'clear-caption', surface, component: 'ToolUse', requestId: 't2', props: { ...props, isErrored: true } })
-    expect(await bad.find({ type: 'Text', text: /\(failed\)/ })).toBeDefined()
-    await bad.unmount()
-
-    // running: the real command shows under the label; finished: the engine's box has it, so no repeat
-    const running = await $.ui.mount({ plugin: 'clear-caption', surface, component: 'ToolUse', requestId: 't3', props: { ...props, isRunning: true } })
-    expect(await running.find({ type: 'Text', text: /\$ ls/ })).toBeDefined()
-    await running.unmount()
-
-    const done = await $.ui.mount({ plugin: 'clear-caption', surface, component: 'ToolUse', requestId: 't4', props })
-    expect(await done.find({ type: 'Text', text: /\$ ls/ })).toBeUndefined()
-    await done.unmount()
+test('odd descriptions never throw', () => {
+  for (const description of [null, undefined, 0, 5, [], {}, true]) {
+    expect(() => captionOf({ tool: 'Bash', description })).not.toThrow()
+    expect(captionOf({ tool: 'Bash', description })).toBe(null)
   }
+})
+
+test('a call logs its caption once and still runs, unchanged', async ($, on) => {
+  const logs: string[] = []
+
+  // stand in for the transcript and the tool, both beneath every plugin
+  on('ui.log', ($, e, next) => {
+    logs.push(e.text)
+    return next(e)
+  })
+  on('tool.call', { tool: ['Bash', 'Read'] }, ($, e) => ({ result: { stdout: `ran ${e.tool}`, stderr: '' } }) as never)
+
+  const ran = await $.tool.call({ tool: 'Bash', command: 'ls', description: 'List files' })
+  expect(ran.result).toEqual({ stdout: 'ran Bash', stderr: '' })
+  expect(logs).toEqual(['List files'])
+
+  await $.tool.call({ tool: 'Bash', command: 'ls' })
+  await $.tool.call({ tool: 'Read', file_path: '/p/a.md' } as never)
+  expect(logs).toEqual(['List files'])
 })

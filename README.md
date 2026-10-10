@@ -1,26 +1,30 @@
 # clear-caption
 
-A Claude Code mod that puts a plain-language caption on every tool call.
+A Claude Code mod that puts a plain-language caption on each shell command and subagent.
 
 Raw commands like `find . -name "*.tmp" -exec rm {} \;` are hard to read at a glance.
-clear-caption shows what the call does instead, and keeps the real command visible.
+clear-caption adds one dim line that says what the call does.
+The tool row and its real command stay exactly as they were.
 
 ```
-● Delete all .tmp files
-  $ find . -name "*.tmp" -exec rm {} \;      <- only while the call runs
+● Bash(find . -name "*.tmp" -exec rm {} \;)
+  ⎿ (output)
+● clear-caption: Delete all .tmp files
 ```
 
 ## What it does
 
-- **Bash and Agent:** the row title is the call's own `description`.
-- **Edit, NotebookEdit, Write, Read:** the row title is built from the file name, for example `Editing app.ts`.
-- **While a Bash call runs:** the real command is shown dim under the caption.
-  The engine's own command box is not drawn until the call ends, so this keeps the command visible.
-- **Failed or interrupted calls:** the dot turns red with `(failed)`, or yellow with `(interrupted)`.
-  The colors follow your theme.
-- **Everything else:** tools without a caption are drawn exactly as the engine draws them.
+- **Bash and Agent calls:** before the call runs, a dim transcript line shows the call's own `description`.
+- **No description:** no line.
+- **Subagents' own calls:** no line, so a busy subagent doesn't flood the transcript.
+- **Everything else:** untouched. The tool row, its command, and its failed or interrupted state are drawn by Claude Code or by your skin, as usual.
 
-It does not touch the spinner, the status line or the footer.
+## Works with other mods
+
+The caption is a transcript line, not a redrawn tool row.
+A skin or any other mod that redraws tool rows can't hide it.
+This has been checked live with the `skins` mod on.
+Only a mod that refuses the call before it runs can stop the line, and then the call doesn't run either.
 
 ## Install
 
@@ -43,27 +47,21 @@ claude --plugin-dir /path/to/clear-caption
 - **Early-access API.**
   Mods use Claude Code's function hooks.
   The type file the engine writes says "EARLY ACCESS: this surface may change between releases without notice."
-  A third-party write-up says function hooks are not shipped and sit behind a default-off flag.
-  That write-up is unconfirmed, so check your own build.
   This mod was built and tested against Claude Code 2.1.296.
 - **The caption is the model's claim.**
-  Bash uses the `description` the model wrote.
-  It can be vague or wrong, which is why the real command stays visible.
-- **Folded rows.**
-  Runs of reads and searches are folded into one count line by the engine, so those rows rarely show a caption.
-- **Other mods.**
-  Another mod that also draws the tool row (for example a skin) can compete with this one.
-  Which one wins depends on load order, which was not verified.
-- **Paths.**
-  File names are split on `/`, so Windows paths show whole.
-- **Not yet confirmed live.**
-  The row caption and the failed state were seen in a real terminal session.
-  The dim command line while a call runs is covered by tests but has not been confirmed on a real screen.
+  It is the `description` the model wrote, which can be vague or wrong.
+  That is why the real command stays in the row.
+- **Where it lands.**
+  The line is drawn under its call's output, not above the row.
+  With parallel calls, each caption sits under its own call.
+- **The line names the mod.**
+  Claude Code prefixes every mod's transcript line with the mod's name, so it reads `clear-caption: ...`.
 
 ## How it works
 
-One `ui.render` hook on `ToolUse` in `hooks/register.tsx`.
-`hooks/label.ts` holds the pure functions that pick the caption, the running command and the state marker.
+One `tool.call` hook in `hooks/register.tsx`.
+It calls `$.ui.log` with the caption and then lets the call run unchanged.
+`hooks/label.ts` holds `captionOf`, the pure function that picks the caption.
 
 ## Develop
 
@@ -72,5 +70,3 @@ claude plugin validate .
 claude plugin test .
 npx -p typescript tsc -p .
 ```
-
-The tests draw the row on the terminal and desktop surfaces with the plugin test kit.
