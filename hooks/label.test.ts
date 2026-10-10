@@ -1,6 +1,6 @@
-import { expect, test } from 'claude-code/testing'
+import { expect, mock, test } from 'claude-code/testing'
 
-import { captionOf } from './label'
+import { captionOf, modeOf } from './label'
 
 test('Bash and Agent use their description, nothing to say gives null', () => {
   expect(captionOf({ tool: 'Bash', description: 'Show working tree status' })).toBe('Show working tree status')
@@ -61,6 +61,65 @@ test('ordinary commands, Agent calls and missing descriptions get no ⚠', () =>
   expect(captionOf({ tool: 'Bash', command: 5, description: 'Odd' })).toBe('Odd')
 })
 
+test('modeOf reads the three modes and refuses the rest', () => {
+  expect(modeOf('all')).toBe('all')
+  expect(modeOf(' RISKY ')).toBe('risky')
+  expect(modeOf('off')).toBe('off')
+
+  for (const bad of ['', 'on', 'quiet', undefined, null, 1, {}]) {
+    expect(modeOf(bad)).toBe(null)
+  }
+})
+
+test('each mode shows what it promises', () => {
+  const safe = { tool: 'Bash', command: 'ls', description: 'List files' }
+  const risky = { tool: 'Bash', command: 'rm -rf build', description: 'Clean the build' }
+
+  expect(captionOf(safe, 'all')).toBe('List files')
+  expect(captionOf(risky, 'all')).toBe('⚠ Clean the build')
+  expect(captionOf(safe, 'risky')).toBe(null)
+  expect(captionOf(risky, 'risky')).toBe('⚠ Clean the build')
+  expect(captionOf(safe, 'off')).toBe(null)
+  expect(captionOf(risky, 'off')).toBe(null)
+})
+
+test('/caption switches the mode, remembers it, and refuses a bad choice', async ($, on) => {
+  mock.store(on)
+  const logs: string[] = []
+
+  on('ui.log', ($, e, next) => {
+    logs.push(e.text)
+    return next(e)
+  })
+  on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: '', stderr: '' } }) as never)
+
+  const bash = async (command: string, description: string) => {
+    logs.length = 0
+    await $.tool.call({ tool: 'Bash', command, description })
+    return [...logs]
+  }
+
+  // what typing `/caption <args>` at the prompt sends
+  const caption = async (args: string) =>
+    (await $.command.run({ command: 'caption', args, origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 100 } })).text
+
+  expect(await bash('ls', 'List files')).toEqual(['List files'])
+
+  expect(await caption('risky')).toMatch(/risky/)
+  expect(await bash('ls', 'List files')).toEqual([])
+  expect(await bash('rm -rf build', 'Clean the build')).toEqual(['⚠ Clean the build'])
+
+  expect(await caption('loud')).toMatch(/all\|risky\|off/)
+  // the bad choice changed nothing
+  expect(await caption('')).toMatch(/risky only/)
+
+  await caption('off')
+  expect(await bash('rm -rf build', 'Clean the build')).toEqual([])
+
+  await caption('all')
+  expect(await bash('ls', 'List files')).toEqual(['List files'])
+})
+
 test('odd descriptions never throw', () => {
   for (const description of [null, undefined, 0, 5, [], {}, true]) {
     expect(() => captionOf({ tool: 'Bash', description })).not.toThrow()
@@ -69,6 +128,7 @@ test('odd descriptions never throw', () => {
 })
 
 test('a call logs its caption once and still runs, unchanged', async ($, on) => {
+  mock.store(on)
   const logs: string[] = []
 
   // stand in for the transcript and the tool, both beneath every plugin

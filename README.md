@@ -22,6 +22,19 @@ The tool row and its real command stay exactly as they were.
 - **Subagents' own calls:** no line, so a busy subagent doesn't flood the transcript.
 - **Everything else:** untouched. The tool row, its command, and its failed or interrupted state are drawn by Claude Code or by your skin, as usual.
 
+## Turn it down
+
+One line per call can be a lot. Pick how much you see:
+
+```
+/caption risky   only ⚠ captions, for destructive commands
+/caption off     no captions
+/caption all     every caption (the default)
+/caption         show the current setting
+```
+
+The choice is saved and applies to every session.
+
 ## Works with other mods
 
 The caption is a transcript line, not a redrawn tool row.
