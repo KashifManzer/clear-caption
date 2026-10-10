@@ -15,6 +15,9 @@ The tool row and its real command stay exactly as they were.
 ## What it does
 
 - **Bash and Agent calls:** before the call runs, a dim transcript line shows the call's own `description`.
+- **Destructive commands:** the caption starts with `⚠` when the command deletes recursively (`rm -r`), force-pushes, runs `git reset --hard` or `git clean -f`, uses `sudo`, pipes `curl` into a shell, or runs `chmod -R`.
+  It checks the real command, so the mark shows even when the description sounds harmless.
+  It is a short list of common spellings, not a guarantee: others, such as `rm --recursive`, are not marked.
 - **No description:** no line.
 - **Subagents' own calls:** no line, so a busy subagent doesn't flood the transcript.
 - **Everything else:** untouched. The tool row, its command, and its failed or interrupted state are drawn by Claude Code or by your skin, as usual.
