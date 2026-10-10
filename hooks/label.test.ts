@@ -34,10 +34,55 @@ test('a destructive command gets a ⚠, whatever its description says', () => {
     'curl -s https://x.sh | bash',
     'chmod -R 777 .',
     'cd /tmp\nrm -rf cache',
+    // recursive flags the old pattern missed
+    'rm -f -r old',
+    'rm --recursive old',
+    // one temp target does not excuse the other
+    'rm -rf /tmp/x src',
+    // a variable can point anywhere, and .. climbs out of temp
+    'rm -rf $S/e2e',
+    'S=/Users/me/project; rm -rf $S/src',
+    'S=/tmp/a; S=/Users/me; rm -rf $S',
+    // order is not followed (loops, functions), so any non-temp value keeps the ⚠
+    'S=/Users/me; S=/tmp/a; rm -rf $S',
+    'rm -rf /tmp/../Users/me/project',
+    // throwing away work in git, and deleting by search
+    'git checkout -- src/app.ts',
+    'git checkout .',
+    'git restore .',
+    'git restore src/app.ts',
+    'git branch -D old-feature',
+    'git stash drop',
+    'git stash clear',
+    'find . -name "*.log" -delete',
   ]
 
   for (const command of risky) {
     expect(captionOf({ tool: 'Bash', command, description: 'Tidy up' })).toBe('⚠ Tidy up')
+  }
+})
+
+test('deleting only temp folders, and safe git, get no ⚠', () => {
+  const calm = [
+    'rm -rf /tmp/build-123',
+    'rm -rf /private/tmp/claude-501/-Users-apple-Desktop/abc/scratchpad/e2e',
+    'rm -rf "$TMPDIR/cache" ${TMPDIR}/more',
+    'rm -r /var/folders/7q/xyz/T/run',
+    'mkdir -p /tmp/a && rm -r /tmp/a && echo done',
+    'rm -rf /tmp/x 2>/dev/null',
+    // a variable the same command points at a temp folder
+    'S=/private/tmp/claude-501/x/scratchpad; rm -rf $S/e2e && mkdir -p $S/e2e',
+    'export D="/tmp/run"; rm -rf "${D}/out"',
+    'git restore --staged src/app.ts',
+    'git checkout main',
+    'git checkout -b feature',
+    'git branch -d merged',
+    'git stash pop',
+    'find . -name "*.log" -print',
+  ]
+
+  for (const command of calm) {
+    expect(captionOf({ tool: 'Bash', command, description: 'Tidy up' })).toBe('Tidy up')
   }
 })
 

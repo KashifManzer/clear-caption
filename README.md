@@ -15,9 +15,19 @@ The tool row and its real command stay exactly as they were.
 ## What it does
 
 - **Bash and Agent calls:** before the call runs, a dim transcript line shows the call's own `description`.
-- **Destructive commands:** the caption starts with `⚠` when the command deletes recursively (`rm -r`), force-pushes, runs `git reset --hard` or `git clean -f`, uses `sudo`, pipes `curl` into a shell, or runs `chmod -R`.
+- **Destructive commands:** the caption starts with `⚠` when the command:
+  - deletes recursively (`rm -r`, `rm --recursive`) outside temp folders;
+  - throws away git work (`git reset --hard`, `git clean -f`, `git checkout -- …` or `git checkout .`, `git restore` without `--staged`, `git branch -D`, `git stash drop` or `git stash clear`);
+  - force-pushes;
+  - deletes by search (`find … -delete`);
+  - uses `sudo`, pipes `curl` into a shell, or runs `chmod -R`.
+
   It checks the real command, so the mark shows even when the description sounds harmless.
-  It is a short list of common spellings, not a guarantee: others, such as `rm --recursive`, are not marked.
+
+  Deleting only under `/tmp`, `/private/tmp`, `/var/folders`, `$TMPDIR` or a `scratchpad` folder is not marked.
+  That includes a `$VAR` that the same command sets to one of those, such as `S=/tmp/run; rm -rf $S`.
+
+  It is a short list of common spellings, not a guarantee. Text inside quotes or heredocs is read as a command too.
 - **No description:** no line.
 - **Subagents' own calls:** no line, so a busy subagent doesn't flood the transcript.
 - **Everything else:** untouched. The tool row, its command, and its failed or interrupted state are drawn by Claude Code or by your skin, as usual.

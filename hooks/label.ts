@@ -4,9 +4,41 @@ const str = (v: unknown) => (typeof v === 'string' ? v.trim() : '')
 // before it reaches the terminal.
 const line = (s: string) => (s.split(/\r\n|\n|\r/)[0] ?? '').replace(/[\u0000-\u001f\u007f-\u009f]/g, '').trim()
 
-// ponytail: a short list of destructive spellings; others (rm --recursive, git push origin +main) slip through.
-// Add a pattern when a real miss shows up.
-const RISKY = /\brm\s+-[a-zA-Z]*[rR]|\bgit\s+push\b[^\n;&|]*\s(-f|--force)\b|\bgit\s+reset\s+--hard\b|\bgit\s+clean\s+-[a-zA-Z]*f|\bsudo\b|\bcurl\b[^|\n]*\|\s*(ba|z)?sh\b|\bchmod\s+-R\b/
+// ponytail: a short list of destructive spellings; others (git push origin +main) slip through, and text inside
+// quotes or heredocs is read as a command too. Add a pattern when a real miss or false alarm shows up.
+const RISKY = /\bgit\s+push\b[^\n;&|]*\s(-f|--force)\b|\bgit\s+reset\s+--hard\b|\bgit\s+clean\s+-[a-zA-Z]*f|\bgit\s+checkout\s+(--\s|\.(\s|$))|\bgit\s+restore\b(?![^\n;&|]*--staged)|\bgit\s+branch\s+-D\b|\bgit\s+stash\s+(drop|clear)\b|\bfind\b[^\n;&|]*\s-delete\b|\bsudo\b|\bcurl\b[^|\n]*\|\s*(ba|z)?sh\b|\bchmod\s+-R\b/
+
+// Temp locations a recursive delete may clear without a ⚠.
+const TEMP = /^(\/tmp\/|\/private\/tmp\/|\/var\/folders\/|\$\{?TMPDIR\}?\/)|\/scratchpad\//
+
+// A recursive `rm` with a target outside temp locations, or none named. Redirections are not targets,
+// and `..` can climb out of temp, so it never counts as one. A `$VAR` the same command sets is read as
+// its value; one set twice keeps a value that is not temp, so it stays flagged.
+function deletesWork(command: string): boolean {
+  const vars = new Map<string, string>()
+
+  for (const [, name = '', value = ''] of command.matchAll(/(?:^|[\s;&])([A-Za-z_]\w*)=["']?([^\s;&"']+)/g)) {
+    const kept = vars.get(name)
+
+    if (kept === undefined || TEMP.test(kept)) {
+      vars.set(name, value)
+    }
+  }
+
+  for (const [, args = ''] of command.matchAll(/\brm\s+([^\n;&|]*)/g)) {
+    const words = args.split(/\s+/).filter(w => w !== '' && !/^\d*[<>]/.test(w))
+    const isRecursive = words.some(w => /^-[a-zA-Z]*[rR]/.test(w) || w === '--recursive')
+    const targets = words
+      .filter(w => !w.startsWith('-'))
+      .map(w => w.replace(/^["']|["']$/g, '').replace(/^\$\{?(\w+)\}?/, (whole, name: string) => vars.get(name) ?? whole))
+
+    if (isRecursive && (targets.length === 0 || targets.some(t => !TEMP.test(t) || t.includes('..')))) {
+      return true
+    }
+  }
+
+  return false
+}
 
 // What `/caption` shows: every caption, only the ⚠ ones, or none.
 export type Mode = 'all' | 'risky' | 'off'
@@ -31,7 +63,9 @@ export function captionOf(e: { tool: string; agentId?: string; description?: unk
     return null
   }
 
-  if (e.tool === 'Bash' && RISKY.test(str(e.command))) {
+  const command = str(e.command)
+
+  if (e.tool === 'Bash' && (RISKY.test(command) || deletesWork(command))) {
     return `⚠ ${caption}`
   }
 
