@@ -1,5 +1,6 @@
 {
   "name": "clear-caption",
   "version": "0.1.0",
+  "author": { "name": "KashifManzer" },
   "description": "Shows a plain-language label on each tool row, keeping the engine's own command box."
 }
