@@ -1,6 +1,6 @@
 {
   "name": "clear-caption",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "author": { "name": "KashifManzer" },
-  "description": "Shows a plain-language caption for each shell command and subagent, alongside any skin or mod."
+  "description": "Shows a plain-language caption for each shell command, subagent and file edit, alongside any skin or mod."
 }
