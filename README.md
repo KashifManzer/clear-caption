@@ -1,132 +1,154 @@
-# clear-caption
+<p align="center">
+  <img src="assets/banner.svg" alt="clear-caption: subtitles for every command Claude runs" width="100%">
+</p>
 
-A Claude Code mod that puts a plain-language caption on each shell command, subagent and file edit.
+<p align="center">
+  <b>Know what Claude is about to run, in plain English.</b>
+</p>
 
-Raw commands like `find . -name "*.tmp" -exec rm {} \;` are hard to read at a glance.
-clear-caption adds one dim line that says what the call does.
-The tool row and its real command stay exactly as they were.
+<p align="center">
+  <a href=".claude-plugin/plugin.json"><img alt="version" src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2FKashifManzer%2Fclear-caption%2Fmain%2F.claude-plugin%2Fplugin.json&query=%24.version&label=version&color=FFD54A&labelColor=0B0B0E"></a>
+  <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-FFD54A?labelColor=0B0B0E"></a>
+  <a href="https://code.claude.com/docs"><img alt="Claude Code mod" src="https://img.shields.io/badge/Claude%20Code-mod-FFD54A?labelColor=0B0B0E"></a>
+  <a href="CONTRIBUTING.md"><img alt="PRs welcome" src="https://img.shields.io/badge/PRs-welcome-FFD54A?labelColor=0B0B0E"></a>
+</p>
+
+<p align="center">
+  <a href="#install">Install</a> ·
+  <a href="#what-you-get">What you get</a> ·
+  <a href="#turn-it-up-or-down">Settings</a> ·
+  <a href="#good-to-know">Good to know</a> ·
+  <a href="CONTRIBUTING.md">Contribute</a>
+</p>
+
+---
+
+## Why
+
+You approve commands all day.
+Some of them look like this: `find . -name "*.tmp" -exec rm {} \;`
+
+clear-caption adds one quiet line above each call that says what it does.
+Your tool rows stay exactly as they were.
+
+**Before**
+
+```
+● Bash(find . -name "*.tmp" -exec rm {} \;)
+● Bash(git reset --hard HEAD)
+● Update(math.js)
+```
+
+**After**
 
 ```
 ● clear-caption: Delete all .tmp files
 ● Bash(find . -name "*.tmp" -exec rm {} \;)
-  ⎿ (output)
+● clear-caption: ⚠ Throw away all local changes
+● Bash(git reset --hard HEAD)
+● clear-caption: Fix clamp: Math.min should cap at hi, not lo.
+● Update(math.js)
 ```
-
-## What it does
-
-- **Bash and Agent calls:** a dim transcript line right above the call's row shows the call's own `description`.
-- **Destructive commands:** the caption starts with `⚠` when the command:
-  - deletes recursively (`rm -r`, `rm --recursive`) outside temp folders;
-  - throws away git work (`git reset --hard`, `git clean -f`, `git checkout -- …` or `git checkout .`, `git restore` without `--staged`, `git branch -D`, `git stash drop` or `git stash clear`);
-  - force-pushes;
-  - deletes by search (`find … -delete`);
-  - uses `sudo`, pipes `curl` into a shell, or runs `chmod -R`.
-
-  It checks the real command, so the mark shows even when the description sounds harmless.
-
-  Deleting only under `/tmp`, `/private/tmp`, `/var/folders`, `$TMPDIR` or a `scratchpad` folder is not marked.
-  That includes a `$VAR` that the same command sets to one of those, such as `S=/tmp/run; rm -rf $S`.
-
-  It is a short list of common spellings, not a guarantee. Text inside quotes or heredocs is read as a command too.
-- **File edits (Edit and Write):** the same kind of line, right above each edit row.
-  These tools have no `description` argument, so the mod adds a note to their tool description asking Claude to pass one anyway: one plain sentence saying why the file changes.
-  The mod takes that argument out again before Claude Code checks the call, so the edit runs as usual and the approval dialog shows a clean diff.
-  A line seen in testing:
-
-  ```
-  ● clear-caption: Fix clamp: Math.min should cap at hi, not lo.
-  ● Update(math.js)
-  ```
-
-  Claude can still batch several edits in one reply; each gets its own line above its own row.
-  In testing, 57 of 57 edits got their line, over Opus, Sonnet and Haiku, including a prompt that said "batch all file edits into one reply and write no commentary at all".
-  On Opus test tasks, runs with and without the note both averaged $0.257; the note added about 3% more output tokens.
-  An edit that comes without the sentence just gets no line; nothing is refused.
-- **No description:** no line.
-- **Subagents' own calls:** no line, so a busy subagent doesn't flood the transcript.
-- **Everything else:** untouched. The tool row, its command, and its failed or interrupted state are drawn by Claude Code or by your skin, as usual.
-
-## Turn it down
-
-One line per call can be a lot. Pick how much you see:
-
-```
-/caption risky   only ⚠ captions, for destructive commands (Claude is not asked about edits)
-/caption off     no captions
-/caption all     every caption (the default)
-/caption         show the current setting
-```
-
-The choice is saved and applies to every session.
-Bash and Agent lines follow it at once, and so does turning edit lines down.
-Turning edit lines on (`/caption all`) needs `/clear` or a new session: Claude Code keeps a session's tool descriptions as they were when it started, so the note to Claude changes only then.
-A resumed session (`--resume`) keeps the note it had.
-
-## Works with other mods
-
-The caption is a transcript line, not a redrawn tool row.
-A skin or any other mod that redraws tool rows can't hide it.
-This has been checked live with the `skins` mod drawing the rows (the `noir` skin), batched edits included.
-The line is logged as soon as Claude has written the call, so it shows even when the call is then denied.
 
 ## Install
 
-Type this at the prompt of a terminal session:
+Paste this at the Claude Code prompt:
 
 ```
 /plugin install clear-caption --marketplace KashifManzer/clear-caption
 ```
 
-Answer `y` to add the marketplace, then pick a scope.
+Answer `y` to add the marketplace, pick a scope, and you're done.
 
-To try it from a local folder without installing:
+## What you get
+
+- 💬 **A caption on every shell command and subagent.** It's the call's own description, shown right above its row.
+- ✏️ **A caption on every file edit.** One sentence on why the file changes, right above the diff.
+- ⚠️ **A warning on risky commands.** Recursive deletes, `git reset --hard`, force-pushes and more get a `⚠`, even when the description sounds harmless.
+- 🎨 **Works with your skin.** Captions are their own lines, so skins and other mods that redraw tool rows can't hide them.
+- 🤫 **Quiet by design.** Subagents' own calls don't get captions, so a busy subagent won't flood your screen.
+
+<details>
+<summary>What counts as risky?</summary>
+
+<br>
+
+The `⚠` shows when the real command:
+
+- deletes recursively (`rm -r`, `rm --recursive`) outside temp folders
+- throws away git work (`git reset --hard`, `git clean -f`, `git checkout -- …` or `git checkout .`, `git restore` without `--staged`, `git branch -D`, `git stash drop` or `git stash clear`)
+- force-pushes
+- deletes by search (`find … -delete`)
+- uses `sudo`, pipes `curl` into a shell, or runs `chmod -R`
+
+Deleting only under `/tmp`, `/private/tmp`, `/var/folders`, `$TMPDIR` or a `scratchpad` folder is not marked.
+That includes a `$VAR` the same command sets to one of those, like `S=/tmp/run; rm -rf $S`.
+
+It's a short list of common spellings, not a guarantee.
+Text inside quotes or heredocs is read as a command too.
+
+</details>
+
+## Turn it up or down
+
+```
+/caption all     every caption (default)
+/caption risky   only ⚠ captions
+/caption off     no captions
+/caption         show the current setting
+```
+
+Your choice is saved for every session.
+Turning edit captions back on with `/caption all` takes effect after `/clear` or in a new session.
+
+## Good to know
+
+- **The caption is Claude's own words.** It can be vague or wrong, so the real command and diff always stay on screen.
+- **Edit captions are tested.** 57 of 57 edits got their line across Opus, Sonnet and Haiku. On Opus test tasks the average cost was $0.257 with or without them, for about 3% more output tokens.
+- **Rows show a moment later.** A Bash or Agent row waits until Claude finishes writing the call, about 0.4-0.8 seconds for Bash. The call itself doesn't run any later.
+- **Built on an early-access API.** Claude Code's mod hooks may change between releases. Tested on Claude Code 2.1.296.
+
+<details>
+<summary>The fine print</summary>
+
+<br>
+
+- **How edit captions work.** Edit and Write have no `description` argument, so the mod asks Claude to add one, then strips it out before Claude Code checks the call. The edit runs as usual and the approval dialog shows a clean diff. An edit without the sentence just gets no line. Nothing is refused.
+- **Where captions land.** Each caption sits right above its own call, even with parallel calls or batched edits. When Claude Code or a skin folds quick read-only calls (like `ls` and `wc`) into one row, the first caption sits above that row and the rest under it.
+- **Spillover.** Twice in about 250 Read calls in testing (both Haiku), Claude added a `description` to Read too. Read ignores it. Grep and Glob refuse it when they're turned on, so such a call would fail once.
+- **Removing the mod mid-session.** The note to Claude stays in that session, but nothing strips the extra argument anymore. In testing the next edit failed once, Claude retried without it, and everything after worked. `/clear` or a new session starts clean.
+- **A resumed session** (`--resume`) keeps the note it started with.
+- **The line names the mod.** Claude Code prefixes every mod's line with its name, so it reads `clear-caption: ...`.
+- **Denied calls still get a caption.** The line is logged as soon as Claude has written the call.
+
+</details>
+
+## How it works
+
+Two hooks in [`hooks/register.tsx`](hooks/register.tsx) do the work.
+`tool.describe` asks Claude for a one-line `description` on Edit and Write.
+`turn.step` holds each call until its arguments arrive, logs the caption with `$.ui.log`, then passes the call on unchanged (edits lose only their `description`).
+The pure parts live in [`hooks/label.ts`](hooks/label.ts).
+
+Want to try a local copy without installing?
 
 ```
 claude --plugin-dir /path/to/clear-caption
 ```
 
-## Read this before relying on it
+## Contributing
 
-- **Early-access API.**
-  Mods use Claude Code's function hooks.
-  The type file the engine writes says "EARLY ACCESS: this surface may change between releases without notice."
-  This mod was built and tested against Claude Code 2.1.296.
-- **The caption is the model's claim.**
-  It is the `description` the model wrote, for an edit as for Bash and Agent.
-  It can be vague or wrong: in testing, Haiku once said "four modules" for three.
-  That is why the real command and the diff stay in the row.
-- **Where it lands.**
-  Every caption sits right above its row.
-  With parallel calls or batched edits, each caption sits above its own call.
-  When Claude Code or a skin folds quick read-only calls (like `ls` and `wc`) into one row, the first caption sits above that row and the rest under it.
-- **The row shows a moment later.**
-  The caption needs the call's `description`, which arrives with the rest of its arguments, so a Bash or Agent row waits until Claude has written the whole call.
-  In testing that was 0.4-0.8 seconds for Bash and 1.6 seconds for an Agent call with a short prompt; a longer prompt waits longer.
-  Edit and Write rows add no wait: Claude Code draws them only once their arguments are in anyway.
-  The call itself runs no later: Claude Code runs a call only once all of its arguments are in.
-- **The extra argument can spill over.**
-  Claude was asked for `description` only on Edit and Write, but twice in about 250 Read calls in testing (both Haiku) it added one to Read too.
-  Read ignores it and ran normally.
-  Grep and Glob, which a default session doesn't have, refuse it when they are turned on, so such a call would fail once.
-- **Removing the mod mid-session.**
-  The note to Claude stays in that session after the mod is turned off or removed, and nothing takes the extra argument out any more.
-  In testing, the next edit then failed once with "An unexpected parameter `description` was provided", Claude sent it again without it, and the following edits worked.
-  A new session, or `/clear`, starts clean.
-- **The line names the mod.**
-  Claude Code prefixes every mod's transcript line with the mod's name, so it reads `clear-caption: ...`.
+Bug reports, ideas and PRs are all welcome.
+Start with [CONTRIBUTING.md](CONTRIBUTING.md).
+Please follow the [Code of Conduct](CODE_OF_CONDUCT.md), and report security issues privately as described in [SECURITY.md](SECURITY.md).
 
-## How it works
+## License
 
-Two hooks in `hooks/register.tsx` do the work.
-A `tool.describe` hook adds `EDIT_ASK` to the Edit and Write tool descriptions under `/caption all`.
-A `turn.step` hook reads Claude's reply as it streams in: it holds each Edit or Write call, and each Bash or Agent call that may get a line, until its arguments are in, calls `$.ui.log` with the caption, then passes the call on.
-Bash and Agent calls pass on unchanged; an edit passes on without its `description`, in every mode and in subagents, since Claude Code refuses arguments it doesn't know.
-`hooks/label.ts` holds the pure parts: `captionOf` picks the caption, and `EDIT_ASK` is the note to Claude.
+[MIT](LICENSE) © KashifManzer
 
-## Develop
-
-```
-claude plugin validate .
-claude plugin test .
-npx -p typescript tsc -p .
-```
+<p align="center">
+  <br>
+  If clear-caption saved you a squint, a ⭐ helps other people find it.
+  <br><br>
+  <sub>Banner type: Instrument Serif and Fira Code, both under the SIL Open Font License.</sub>
+</p>
