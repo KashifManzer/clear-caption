@@ -28,24 +28,20 @@ The tool row and its real command stay exactly as they were.
   That includes a `$VAR` that the same command sets to one of those, such as `S=/tmp/run; rm -rf $S`.
 
   It is a short list of common spellings, not a guarantee. Text inside quotes or heredocs is read as a command too.
-- **File edits (Edit and Write):** these calls carry no description, so Claude writes the reason itself.
-  A line added to Claude's system prompt asks for one plain sentence right before each edit, one edit per reply, so it sits right above the edit row, like this one seen in testing:
+- **File edits (Edit and Write):** the same kind of line, right above each edit row.
+  These tools have no `description` argument, so the mod adds a note to their tool description asking Claude to pass one anyway: one plain sentence saying why the file changes.
+  The mod takes that argument out again before Claude Code checks the call, so the edit runs as usual and the approval dialog shows a clean diff.
+  A line seen in testing:
 
   ```
-  Fix math.js: add used minus, avg broke on an empty list, clamp ignored hi.
+  ● clear-caption: Fix clamp: Math.min should cap at hi, not lo.
+  ● Update(math.js)
   ```
 
-  It is Claude's own chat text, so it has no `clear-caption:` prefix and gives Claude's own reason.
-  If an edit comes without its sentence, it is refused once with a note saying what to do; Claude then writes the sentence and sends the edit again.
-  The same edit sent a second time always goes through, so this can't loop.
-  A refusal shows as one red ✕ row with the note.
-  Subagents' edits are never refused, and in testing a subagent did not get the system-prompt line.
-  Costs to know:
-  - Claude sends file edits one per reply instead of in a batch, which means more round trips.
-    On small test tasks that cost 12-35% more; `/caption risky` or `off` turns it off.
-  - A request to batch edits loses to this rule; Claude says so.
-    Batching with one line per file was tried: when Claude batched, it wrote no lines (0 of 16 batched replies), even when refused.
-  - The sentence ran 9-21 words in testing; 15 is asked for, not forced.
+  Claude can still batch several edits in one reply; each gets its own line above its own row.
+  In testing, 57 of 57 edits got their line, over Opus, Sonnet and Haiku, including a prompt that said "batch all file edits into one reply and write no commentary at all".
+  On Opus test tasks, runs with and without the note both averaged $0.257; the note added about 3% more output tokens.
+  An edit that comes without the sentence just gets no line; nothing is refused.
 - **No description:** no line.
 - **Subagents' own calls:** no line, so a busy subagent doesn't flood the transcript.
 - **Everything else:** untouched. The tool row, its command, and its failed or interrupted state are drawn by Claude Code or by your skin, as usual.
@@ -62,15 +58,16 @@ One line per call can be a lot. Pick how much you see:
 ```
 
 The choice is saved and applies to every session.
-The edit refusals follow it at once, but the system-prompt line changes only from the next session.
-So turning captions on mid-session can mean an edit gets refused once before Claude adjusts.
+Bash and Agent lines follow it at once, and so does turning edit lines down.
+Turning edit lines on (`/caption all`) needs `/clear` or a new session: Claude Code keeps a session's tool descriptions as they were when it started, so the note to Claude changes only then.
+A resumed session (`--resume`) keeps the note it had.
 
 ## Works with other mods
 
 The caption is a transcript line, not a redrawn tool row.
 A skin or any other mod that redraws tool rows can't hide it.
-This has been checked live with the `skins` mod on.
-The line is logged as soon as Claude has written the call, so it shows even when the call is then denied or refused.
+This has been checked live with the `skins` mod drawing the rows (the `noir` skin), batched edits included.
+The line is logged as soon as Claude has written the call, so it shows even when the call is then denied.
 
 ## Install
 
@@ -95,27 +92,36 @@ claude --plugin-dir /path/to/clear-caption
   The type file the engine writes says "EARLY ACCESS: this surface may change between releases without notice."
   This mod was built and tested against Claude Code 2.1.296.
 - **The caption is the model's claim.**
-  For Bash and Agent it is the `description` the model wrote; for an edit it is Claude's sentence.
-  Either can be vague or wrong.
+  It is the `description` the model wrote, for an edit as for Bash and Agent.
+  It can be vague or wrong: in testing, Haiku once said "four modules" for three.
   That is why the real command and the diff stay in the row.
 - **Where it lands.**
-  Every caption sits right above its row, and an edit's sentence does too.
-  With parallel calls, each caption sits above its own call.
+  Every caption sits right above its row.
+  With parallel calls or batched edits, each caption sits above its own call.
   When Claude Code or a skin folds quick read-only calls (like `ls` and `wc`) into one row, the first caption sits above that row and the rest under it.
 - **The row shows a moment later.**
   The caption needs the call's `description`, which arrives with the rest of its arguments, so a Bash or Agent row waits until Claude has written the whole call.
   In testing that was 0.4-0.8 seconds for Bash and 1.6 seconds for an Agent call with a short prompt; a longer prompt waits longer.
+  Edit and Write rows add no wait: Claude Code draws them only once their arguments are in anyway.
   The call itself runs no later: Claude Code runs a call only once all of its arguments are in.
+- **The extra argument can spill over.**
+  Claude was asked for `description` only on Edit and Write, but twice in about 250 Read calls in testing (both Haiku) it added one to Read too.
+  Read ignores it and ran normally.
+  Grep and Glob, which a default session doesn't have, refuse it when they are turned on, so such a call would fail once.
+- **Removing the mod mid-session.**
+  The note to Claude stays in that session after the mod is turned off or removed, and nothing takes the extra argument out any more.
+  In testing, the next edit then failed once with "An unexpected parameter `description` was provided", Claude sent it again without it, and the following edits worked.
+  A new session, or `/clear`, starts clean.
 - **The line names the mod.**
   Claude Code prefixes every mod's transcript line with the mod's name, so it reads `clear-caption: ...`.
 
 ## How it works
 
-Three hooks in `hooks/register.tsx`.
-A `turn.step` hook reads Claude's reply as it streams in: it holds each Bash or Agent call until its arguments are in, calls `$.ui.log` with the caption, then passes the call on unchanged.
-A `prompt.compose` hook adds `EDIT_RULE` to Claude's system prompt.
-A `tool.call` hook on Edit and Write reads the reply that holds the call (`$.session.messages`) and refuses it once if no text comes right before it.
-`hooks/label.ts` holds the pure parts: `captionOf` picks a Bash or Agent caption, and `saysWhy` checks for the sentence.
+Two hooks in `hooks/register.tsx` do the work.
+A `tool.describe` hook adds `EDIT_ASK` to the Edit and Write tool descriptions under `/caption all`.
+A `turn.step` hook reads Claude's reply as it streams in: it holds each Edit or Write call, and each Bash or Agent call that may get a line, until its arguments are in, calls `$.ui.log` with the caption, then passes the call on.
+Bash and Agent calls pass on unchanged; an edit passes on without its `description`, in every mode and in subagents, since Claude Code refuses arguments it doesn't know.
+`hooks/label.ts` holds the pure parts: `captionOf` picks the caption, and `EDIT_ASK` is the note to Claude.
 
 ## Develop
 

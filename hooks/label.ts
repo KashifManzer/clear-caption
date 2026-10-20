@@ -49,11 +49,11 @@ export function modeOf(v: unknown): Mode | null {
 }
 
 // Plain-language caption for a tool call, or null to say nothing.
-// Bash and Agent carry the model's `description` (a claim, not proof: the tool row keeps the real command),
-// so a destructive command is marked whatever its description says.
+// Bash, Agent, Edit and Write carry the model's `description` (a claim, not proof: the tool row keeps the real
+// command or diff), so a destructive command is marked whatever its description says.
 // A subagent's own calls are skipped so they don't flood the main transcript.
 export function captionOf(e: { tool: string; agentId?: string; description?: unknown; command?: unknown }, mode: Mode = 'all'): string | null {
-  if (mode === 'off' || e.agentId !== undefined || (e.tool !== 'Bash' && e.tool !== 'Agent')) {
+  if (mode === 'off' || e.agentId !== undefined || !['Bash', 'Agent', 'Edit', 'Write'].includes(e.tool)) {
     return null
   }
 
@@ -72,31 +72,7 @@ export function captionOf(e: { tool: string; agentId?: string; description?: unk
   return mode === 'all' ? caption : null
 }
 
-// Edit and Write carry no description, so Claude is asked in its system prompt to say why, in its own words,
-// right before each edit. One edit per reply, since Claude writes one sentence per reply, not per call.
-export const EDIT_RULE =
-  'Right before every Edit or Write call, write one plain sentence of at most 15 words saying why this file changes and what you add or remove. Make one Edit or Write call per reply, so each call gets its own sentence right before it; never batch several file edits in one reply. Example: "Fix clamp: it compared with lo where it needs hi."'
-
-// What Claude reads when an edit comes without its sentence.
-export const EDIT_REFUSAL =
-  'clear-caption: first write one plain sentence of at most 15 words saying why this file changes and what you add or remove, then make this same call again, alone in its reply.'
-
-type Block = { type?: unknown; id?: unknown; text?: unknown }
-
-// Whether Claude wrote text right before this call in the reply that holds it (thinking skipped),
-// or null when no reply holds it, so a guard can let the call through rather than guess.
-// ponytail: a reply cut off mid-stream resumes after a hidden user message, so its sentence and call land in two
-// messages and the call is refused once (1 in 59 test sessions); neither message form marks the hidden one.
-export function saysWhy(messages: readonly { content: unknown }[], toolUseId: string): boolean | null {
-  const blocks = messages
-    .map(m => (Array.isArray(m.content) ? (m.content as Block[]) : []))
-    .findLast(c => c.some(b => b?.id === toolUseId))
-
-  if (blocks === undefined) {
-    return null
-  }
-
-  const before = blocks.slice(0, blocks.findIndex(b => b?.id === toolUseId)).filter(b => !String(b?.type).includes('thinking')).at(-1)
-
-  return before?.type === 'text' && str(before.text) !== ''
-}
+// Edit and Write have no description field, so their tool description asks Claude to add one; the field is taken
+// out before Claude Code checks the call, as it refuses arguments it doesn't know.
+export const EDIT_ASK =
+  'IMPORTANT: this tool takes one more argument than its schema lists: `description` (string, required). Write it first: one plain sentence of at most 15 words saying why this file changes and what you add or remove, as with Bash. It is shown to the user above the edit and removed before the tool runs. Example: {"description": "Fix clamp: it compared with lo where it needs hi.", "file_path": "...", ...}'

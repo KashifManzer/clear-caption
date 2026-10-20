@@ -1,6 +1,6 @@
 import { expect, mock, test, type TestBody } from 'claude-code/testing'
 
-import { captionOf, EDIT_REFUSAL, EDIT_RULE, modeOf, saysWhy } from './label'
+import { captionOf, EDIT_ASK, modeOf } from './label'
 
 const STEP = { turnId: 't', index: 0, model: 'm', messageCount: 1 }
 const DONE = { turnId: 't', index: 0, answer: '', toolUses: [], stopReason: 'tool_use', usage: null }
@@ -11,6 +11,10 @@ const reply = (calls: { name: string; input: object }[]) =>
     const json = JSON.stringify(input)
     return [{ kind: 'tool', index, id: `t${index}`, name }, { kind: 'input', index, json: json.slice(0, 5) }, { kind: 'input', index, json: json.slice(5) }]
   })
+
+// What typing `/caption <args>` at the prompt sends.
+const caption = async ($: Parameters<TestBody>[0], args: string) =>
+  (await $.command.run({ command: 'caption', args, origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 100 } })).text
 
 // Streams a reply from beneath every plugin; resolves to what comes out on top, each logged line in its place.
 function streams($: Parameters<TestBody>[0], on: Parameters<TestBody>[1]) {
@@ -39,16 +43,20 @@ function streams($: Parameters<TestBody>[0], on: Parameters<TestBody>[1]) {
   }
 }
 
-test('Bash and Agent use their description, nothing to say gives null', () => {
+test('Bash, Agent, Edit and Write use their description, nothing to say gives null', () => {
   expect(captionOf({ tool: 'Bash', description: 'Show working tree status' })).toBe('Show working tree status')
   expect(captionOf({ tool: 'Agent', description: 'Search the repo' })).toBe('Search the repo')
+  expect(captionOf({ tool: 'Edit', description: 'Fix add: it subtracts.' })).toBe('Fix add: it subtracts.')
+  expect(captionOf({ tool: 'Write', description: 'Add the notes file.' })).toBe('Add the notes file.')
   expect(captionOf({ tool: 'Bash' })).toBe(null)
   expect(captionOf({ tool: 'Bash', description: '   ' })).toBe(null)
-  expect(captionOf({ tool: 'Edit', description: 'x' })).toBe(null)
+  expect(captionOf({ tool: 'Read', description: 'x' })).toBe(null)
+  expect(captionOf({ tool: 'NotebookEdit', description: 'x' })).toBe(null)
 })
 
 test('a subagent call is skipped', () => {
   expect(captionOf({ tool: 'Bash', description: 'List files', agentId: 'a1' })).toBe(null)
+  expect(captionOf({ tool: 'Edit', description: 'Fix add', agentId: 'a1' })).toBe(null)
 })
 
 test('captions are one line with no control characters', () => {
@@ -57,6 +65,7 @@ test('captions are one line with no control characters', () => {
   expect(captionOf({ tool: 'Bash', description: '\n\nWhat it does' })).toBe('What it does')
   expect(captionOf({ tool: 'Bash', description: 'Clean\u001b[31m red \u001b[0mup' })).toBe('Clean[31m red [0mup')
   expect(captionOf({ tool: 'Bash', description: 'Ring\u0007 bell' })).toBe('Ring bell')
+  expect(captionOf({ tool: 'Edit', description: 'Fix add\u001b]0;pwned\u0007\nmore' })).toBe('Fix add]0;pwned')
 })
 
 test('a destructive command gets a ⚠, whatever its description says', () => {
@@ -123,7 +132,7 @@ test('deleting only temp folders, and safe git, get no ⚠', () => {
   }
 })
 
-test('ordinary commands, Agent calls and missing descriptions get no ⚠', () => {
+test('ordinary commands, Agent calls, edits and missing descriptions get no ⚠', () => {
   const ordinary = [
     'rm file.txt',
     'git push',
@@ -139,6 +148,7 @@ test('ordinary commands, Agent calls and missing descriptions get no ⚠', () =>
   }
 
   expect(captionOf({ tool: 'Agent', command: 'rm -rf x', description: 'Search' })).toBe('Search')
+  expect(captionOf({ tool: 'Write', command: 'rm -rf x', description: 'Add a script' })).toBe('Add a script')
   expect(captionOf({ tool: 'Bash', command: 'rm -rf x' })).toBe(null)
   expect(captionOf({ tool: 'Bash', command: 5, description: 'Odd' })).toBe('Odd')
 })
@@ -156,13 +166,17 @@ test('modeOf reads the three modes and refuses the rest', () => {
 test('each mode shows what it promises', () => {
   const safe = { tool: 'Bash', command: 'ls', description: 'List files' }
   const risky = { tool: 'Bash', command: 'rm -rf build', description: 'Clean the build' }
+  const edit = { tool: 'Edit', description: 'Fix add' }
 
   expect(captionOf(safe, 'all')).toBe('List files')
   expect(captionOf(risky, 'all')).toBe('⚠ Clean the build')
+  expect(captionOf(edit, 'all')).toBe('Fix add')
   expect(captionOf(safe, 'risky')).toBe(null)
   expect(captionOf(risky, 'risky')).toBe('⚠ Clean the build')
+  expect(captionOf(edit, 'risky')).toBe(null)
   expect(captionOf(safe, 'off')).toBe(null)
   expect(captionOf(risky, 'off')).toBe(null)
+  expect(captionOf(edit, 'off')).toBe(null)
 })
 
 test('/caption switches the mode, remembers it, and refuses a bad choice', async ($, on) => {
@@ -171,25 +185,24 @@ test('/caption switches the mode, remembers it, and refuses a bad choice', async
   const bash = async (command: string, description: string) =>
     (await say(reply([{ name: 'Bash', input: { command, description } }]))).filter(s => typeof s === 'string').map(s => s.slice(5))
 
-  // what typing `/caption <args>` at the prompt sends
-  const caption = async (args: string) =>
-    (await $.command.run({ command: 'caption', args, origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 100 } })).text
-
   expect(await bash('ls', 'List files')).toEqual(['List files'])
 
-  expect(await caption('risky')).toMatch(/risky/)
+  expect(await caption($, 'risky')).toMatch(/risky/)
   expect(await bash('ls', 'List files')).toEqual([])
   expect(await bash('rm -rf build', 'Clean the build')).toEqual(['⚠ Clean the build'])
 
-  expect(await caption('loud')).toMatch(/all\|risky\|off/)
+  expect(await caption($, 'loud')).toMatch(/all\|risky\|off/)
   // the bad choice changed nothing
-  expect(await caption('')).toMatch(/risky only/)
+  expect(await caption($, '')).toMatch(/risky only/)
 
-  await caption('off')
+  await caption($, 'off')
   expect(await bash('rm -rf build', 'Clean the build')).toEqual([])
 
-  await caption('all')
+  // edits are asked for their line only from the next /clear, so switching back on says so
+  expect(await caption($, 'all')).toBe('Captions: every caption. Edit lines start after /clear if this session began without them')
   expect(await bash('ls', 'List files')).toEqual(['List files'])
+  expect(await caption($, 'all')).toBe('Captions: every caption')
+  expect(await caption($, 'risky')).toBe('Captions: risky only (⚠ commands)')
 })
 
 test('odd descriptions never throw', () => {
@@ -232,165 +245,135 @@ test('a caption is logged right before its call, and the reply passes on unchang
   expect(await say(ls!)).toEqual(['log: List files', ...ls!])
 })
 
+test('each edit in a batch gets its own line above its row, and Claude Code never sees the description', async ($, on) => {
+  mock.store(on)
+  const say = streams($, on)
+
+  const stop = { kind: 'stop', stopReason: 'tool_use', usage: null }
+  const fix = { file_path: '/p/a.js', old_string: 'a - b', new_string: 'a + b' }
+  // quotes, newlines, emoji and a lone surrogate come out as they went in
+  const notes = { file_path: '/p/n.md', content: 'say "hi"\n\tline ✓ 😀 \ud800' }
+  // text that only looks like the field, inside another argument, is left alone
+  const tricky = { file_path: '/p/b.js', old_string: 'x', new_string: '{"description": "not mine"}', replace_all: true }
+  const calls = reply([
+    { name: 'Edit', input: { description: 'Fix add: it subtracts.', ...fix } },
+    { name: 'Write', input: { description: 'Add the notes file.', ...notes } },
+    { name: 'Bash', input: { command: 'ls', description: 'List files' } },
+    { name: 'Edit', input: tricky },
+    // another tool keeps whatever it was sent
+    { name: 'Read', input: { file_path: '/p/a.md', description: 'x' } },
+  ])
+  const [edit, write, bash, plain, read] = [0, 3, 6, 9, 12].map(i => calls.slice(i, i + 3))
+  const without = (index: number, input: object) => ({ kind: 'input', index, json: JSON.stringify(input) })
+
+  expect(await say([...calls, stop])).toEqual([
+    'log: Fix add: it subtracts.',
+    edit![0],
+    without(0, fix),
+    'log: Add the notes file.',
+    write![0],
+    without(1, notes),
+    'log: List files',
+    ...bash!,
+    ...plain!,
+    ...read!,
+    stop,
+  ])
+})
+
+test("an edit's description is taken out in every mode and in a subagent, with a line only under all", async ($, on) => {
+  mock.store(on)
+  const say = streams($, on)
+
+  const edit = reply([{ name: 'Edit', input: { description: 'Fix add', file_path: '/p/a.js', old_string: 'a', new_string: 'b' } }])
+  const stripped = [edit[0], { kind: 'input', index: 0, json: '{"file_path":"/p/a.js","old_string":"a","new_string":"b"}' }]
+
+  expect(await say(edit)).toEqual(['log: Fix add', ...stripped])
+  expect(await say(edit, 'a1')).toEqual(stripped)
+
+  for (const mode of ['risky', 'off']) {
+    await caption($, mode)
+    expect(await say(edit)).toEqual(stripped)
+  }
+
+  // a description that says nothing is still taken out, with no line
+  await caption($, 'all')
+  for (const description of ['', '  ', null, 5, {}]) {
+    const odd = reply([{ name: 'Write', input: { description, file_path: '/p/a', content: 'x' } }])
+    expect(await say(odd)).toEqual([odd[0], { kind: 'input', index: 0, json: '{"file_path":"/p/a","content":"x"}' }])
+  }
+})
+
 test('a call with nothing to say, or arguments that do not parse, passes with no line', async ($, on) => {
   mock.store(on)
   const say = streams($, on)
 
-  const bare = reply([{ name: 'Bash', input: { command: 'ls' } }])
-  expect(await say(bare)).toEqual(bare)
+  for (const name of ['Bash', 'Edit', 'Write']) {
+    const bare = reply([{ name, input: { file_path: '/p/a', command: 'ls' } }])
+    expect(await say(bare)).toEqual(bare)
 
-  const broken = [{ kind: 'tool', index: 0, id: 't0', name: 'Bash' }, { kind: 'input', index: 0, json: '{"command": "ls' }]
-  expect(await say(broken)).toEqual(broken)
+    const broken = [{ kind: 'tool', index: 0, id: 't0', name }, { kind: 'input', index: 0, json: '{"description": "Fix' }]
+    expect(await say(broken)).toEqual(broken)
 
-  for (const json of ['null', '5', '"x"', '[]']) {
-    const odd = [{ kind: 'tool', index: 0, id: 't0', name: 'Bash' }, { kind: 'input', index: 0, json }]
-    expect(await say(odd)).toEqual(odd)
+    for (const json of ['null', '5', '"x"', '[]', '["description"]']) {
+      const odd = [{ kind: 'tool', index: 0, id: 't0', name }, { kind: 'input', index: 0, json }]
+      expect(await say(odd)).toEqual(odd)
+    }
   }
 })
 
-test('only a call that may get a line is held back: never in a subagent or with captions off', async ($, on) => {
+test('Bash is held back only where it may get a line; an edit always is, to take its description out', async ($, on) => {
   mock.store(on)
-  const caption = (args: string) =>
-    $.command.run({ command: 'caption', args, origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 100 } })
 
+  let name = ''
   let seen = 0
   const rowOutFirst: boolean[] = []
   on('turn.step', async function* () {
-    yield { kind: 'tool', index: 0, id: 't0', name: 'Bash' } as never
+    yield { kind: 'tool', index: 0, id: 't0', name } as never
     // by the time the arguments come, a row not held is already out
     rowOutFirst.push(seen > 0)
-    yield { kind: 'input', index: 0, json: '{"command":"ls","description":"List files"}' } as never
+    yield { kind: 'input', index: 0, json: '{"description":"Say it"}' } as never
     return DONE as never
   })
 
-  const step = async (agentId?: string) => {
+  const step = async (tool: string, agentId?: string) => {
+    name = tool
     seen = 0
     for await (const _ of $.turn.step({ ...STEP, agentId })) seen++
     return seen
   }
 
-  expect(await step('a1')).toBe(2)
-  await caption('off')
-  expect(await step()).toBe(2)
-  await caption('risky')
-  expect(await step()).toBe(2)
-  await caption('all')
-  expect(await step()).toBe(2)
+  for (const mode of ['all', 'risky', 'off']) {
+    await caption($, mode)
+    expect(await step('Bash')).toBe(2)
+    expect(await step('Bash', 'a1')).toBe(2)
+    expect(await step('Edit')).toBe(2)
+    expect(await step('Write', 'a1')).toBe(2)
+  }
 
-  expect(rowOutFirst).toEqual([true, true, false, false])
+  expect(rowOutFirst).toEqual([false, true, false, false, false, true, false, false, true, true, false, false])
 })
 
-test('saysWhy finds text right before the call in the reply that holds it', () => {
-  const reply = (...content: object[]) => ({ role: 'assistant', content })
-  const result = { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'x' }] }
-  const edit = (id: string) => ({ type: 'tool_use', id, name: 'Edit' })
-  const text = (t: string) => ({ type: 'text', text: t })
-
-  expect(saysWhy([reply(text('Fix add: it subtracts.'), edit('e1'))], 'e1')).toBe(true)
-  // thinking between the sentence and the call does not count against it
-  expect(saysWhy([reply(text('Fix add.'), { type: 'thinking', thinking: '' }, { type: 'redacted_thinking' }, edit('e1'))], 'e1')).toBe(true)
-  // the reply may sit before later tool results
-  expect(saysWhy([reply(text('Fix add.'), edit('e1')), result], 'e1')).toBe(true)
-
-  // the second call of a batch, a reply with no text, or empty text: no sentence
-  expect(saysWhy([reply(text('Fix two things.'), edit('e1'), edit('e2'))], 'e2')).toBe(false)
-  expect(saysWhy([reply(edit('e1'))], 'e1')).toBe(false)
-  expect(saysWhy([reply({ type: 'thinking', thinking: 'why' }, edit('e1'))], 'e1')).toBe(false)
-  expect(saysWhy([reply(text('  \n '), edit('e1'))], 'e1')).toBe(false)
-  // text before an earlier reply's call is not this call's sentence
-  expect(saysWhy([reply(text('Fix add.'), edit('e1')), result, reply(edit('e2'))], 'e2')).toBe(false)
-
-  // nowhere to be found, or odd shapes: null, so the guard lets it through
-  expect(saysWhy([], 'e1')).toBe(null)
-  expect(saysWhy([reply(text('x'), edit('e1'))], 'e9')).toBe(null)
-  expect(saysWhy([{ content: 'plain string' }, { content: null }, { content: [null, 5, 'x'] }], 'e1')).toBe(null)
-})
-
-test('the system prompt asks for a sentence before each edit, only when every caption is on', async ($, on) => {
+test('edits are asked for a description only under all, and keep the rest of what they say', async ($, on) => {
   mock.store(on)
-  on('prompt.compose', () => ({ sections: [{ id: 'intro', text: 'core', scope: 'shared' }] }) as never)
+  // stand in for the engine's own description, beneath every plugin
+  on('tool.describe', ($, e) => ({ description: e.description, isDeferred: false }))
 
-  const compose = async () =>
-    (await $.prompt.compose({ model: 'm', promptModel: 'm', surfaces: [], tools: [], outputStyle: null, traits: [] })).sections
-  const caption = (args: string) =>
-    $.command.run({ command: 'caption', args, origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 100 } })
+  const describe = (tool: string) =>
+    $.tool.describe({ tool, description: `${tool} does things.`, provider: { plugin: 'engine', tier: 'core' } } as never)
 
-  expect(await compose()).toEqual([
-    { id: 'intro', text: 'core', scope: 'shared' },
-    { id: 'clear-caption:edits', scope: 'session', text: EDIT_RULE },
-  ])
+  expect(await describe('Edit')).toEqual({ description: `Edit does things.\n\n${EDIT_ASK}`, isDeferred: false })
+  expect(await describe('Write')).toEqual({ description: `Write does things.\n\n${EDIT_ASK}`, isDeferred: false })
+
+  for (const tool of ['Bash', 'Read', 'NotebookEdit']) {
+    expect(await describe(tool)).toEqual({ description: `${tool} does things.`, isDeferred: false })
+  }
 
   for (const mode of ['risky', 'off']) {
-    await caption(mode)
-    expect(await compose()).toEqual([{ id: 'intro', text: 'core', scope: 'shared' }])
+    await caption($, mode)
+    expect(await describe('Edit')).toEqual({ description: 'Edit does things.', isDeferred: false })
   }
-})
 
-test('an edit without its sentence is refused once, then goes through', async ($, on) => {
-  mock.store(on)
-  let messages: object[] = []
-  const ran: string[] = []
-
-  on('session.messages', () => ({ value: messages }) as never)
-  on('tool.call', { tool: ['Edit', 'Write'] }, ($, e) => (ran.push(e.tool_use_id), { result: 'done' }) as never)
-
-  const reply = (id: string, said?: string) => [
-    { role: 'assistant', content: [...(said === undefined ? [] : [{ type: 'text', text: said }]), { type: 'tool_use', id, name: 'Edit' }] },
-  ]
-  const edit = (tool_use_id: string, new_string = 'b') =>
-    $.tool.call({ tool: 'Edit', tool_use_id, file_path: '/p/a.ts', old_string: 'a', new_string } as never)
-
-  // with its sentence: runs
-  messages = reply('e1', 'Fix add: it subtracts.')
-  expect(await edit('e1')).toMatchObject({ result: 'done' })
-
-  // without: refused, with what to do
-  messages = reply('e2')
-  expect(await edit('e2')).toEqual({ deny: EDIT_REFUSAL })
-
-  // the same edit again, still without a sentence: goes through, so it cannot loop
-  messages = reply('e3')
-  expect(await edit('e3')).toMatchObject({ result: 'done' })
-  // ...and only once: the next unexplained one is refused again
-  messages = reply('e4')
-  expect(await edit('e4')).toEqual({ deny: EDIT_REFUSAL })
-
-  // a different edit without a sentence is its own refusal
-  messages = reply('e5')
-  expect(await edit('e5', 'c')).toEqual({ deny: EDIT_REFUSAL })
-
-  // a call no reply holds is let through rather than guessed at
-  messages = []
-  expect(await edit('e6', 'd')).toMatchObject({ result: 'done' })
-
-  expect(ran).toEqual(['e1', 'e3', 'e6'])
-})
-
-test('subagents and quieter modes are never refused', async ($, on) => {
-  mock.store(on)
-  on('session.messages', () => ({ value: [{ role: 'assistant', content: [{ type: 'tool_use', id: 'e1', name: 'Write' }] }] }) as never)
-  on('tool.call', { tool: ['Edit', 'Write'] }, () => ({ result: 'done' }) as never)
-
-  const write = (extra: object = {}) =>
-    $.tool.call({ tool: 'Write', tool_use_id: 'e1', file_path: '/p/a.ts', content: 'x', ...extra } as never)
-  const caption = (args: string) =>
-    $.command.run({ command: 'caption', args, origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 100 } })
-
-  expect(await write({ agentId: 'a1' })).toMatchObject({ result: 'done' })
-
-  await caption('risky')
-  expect(await write()).toMatchObject({ result: 'done' })
-  await caption('off')
-  expect(await write()).toMatchObject({ result: 'done' })
-
-  await caption('all')
-  expect(await write()).toEqual({ deny: EDIT_REFUSAL })
-})
-
-test('when the transcript cannot be read, the edit still runs', async ($, on) => {
-  mock.store(on)
-  on('tool.call', { tool: ['Edit', 'Write'] }, () => ({ result: 'done' }) as never)
-
-  // no session.messages answer at all: the guard fails and is skipped
-  expect(await $.tool.call({ tool: 'Write', tool_use_id: 'e1', file_path: '/p/a.ts', content: 'x' } as never)).toMatchObject({ result: 'done' })
+  await caption($, 'all')
+  expect(await describe('Write')).toEqual({ description: `Write does things.\n\n${EDIT_ASK}`, isDeferred: false })
 })
